@@ -1,8 +1,6 @@
-# ND9991 - Course 2 - Infrastructure as Code
+# Infrastructure as Code
 
-This repository contains the starter code for the final project of course 2 Infrastructure as Code in the Cloud DevOps Engineer Nanodegree.
-
-Please note that all supporting material for this course can be found in [this Github repository](https://github.com/udacity/cd12352-Deploy-Infrastructure-as-Code).
+The starter code for the Infrastructure as Code project.
 
 # Deploy a high-availability web app using CloudFormation
 
