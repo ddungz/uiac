@@ -1,11 +1,22 @@
-Description: CD12352 - Infrastructure as Code Project - Udagram
+#!/bin/bash
+Description: Infrastructure as Code Project - Udagram Server
 
 Parameters:
-  # Add your parameters here
+  ProjectName:
+    Type: String
+    Description: Udagram Project Server
+  VolumeSize:
+    Type: String
+    Description: Size of the EC2 volume
+    Default: "10"
+  KeyPairName:
+    Type: String
+    Description: Name of the key pair
+  ImageId:
+    Type: String
+    Description: ID of the AMI
 
 Resources:
-  # Add your resources here
-  # We include a portion of the LaunchTemplate resource so you can use the UserData.
   WebAppLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties: 
@@ -13,6 +24,148 @@ Resources:
         UserData:
           Fn::Base64: |
             #!/bin/bash
-            apt-get update -y
+            sudo apt-get update -y
             sudo apt-get install nginx -y
             service nginx start
+            WEB_DIR="/var/www/html"
+            sudo mkdir -p $WEB_DIR
+            sudo chown -R $USER:$USER $WEB_DIR
+            # Create a basic index.html file
+            cat <<EOF > index.html
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <title>Welcome to Udagram</title>
+            </head>
+            <body>
+              <p>Welcome to Udagram</p>
+            </body>
+            </html>
+            EOF
+            sudo rm -r $WEB_DIR/index.*
+            sudo mv index.html $WEB_DIR/index.html
+            service nginx restart
+        ImageId: !Ref ImageId 
+        KeyName: !Ref KeyPairName
+        SecurityGroupIds:
+        - !Ref WebServerSecGroup
+        InstanceType: t2.micro
+        BlockDeviceMappings:
+        - DeviceName: "/dev/sdk"
+          Ebs:
+            VolumeSize: !Ref VolumeSize
+        IamInstanceProfile:
+          Name: !Ref WebAppInstanceProfile
+
+  LBSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http access to our load balancer
+      VpcId:
+        Fn::ImportValue:
+          !Sub "${ProjectName}-VPCID"
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+  WebServerSecGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow http access to our hosts from the LB Security Group only
+      VpcId:
+        Fn::ImportValue:
+          !Sub "${ProjectName}-VPCID"
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        SourceSecurityGroupId: !Ref LBSecGroup
+      SecurityGroupEgress:
+      - IpProtocol: tcp
+        FromPort: 0
+        ToPort: 65535
+        CidrIp: 0.0.0.0/0
+
+  WebAppAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier:
+        - Fn::ImportValue: !Sub "${ProjectName}-PRIV-NETS"
+      LaunchTemplate:
+        LaunchTemplateId: !Ref WebAppLaunchTemplate
+        Version: !GetAtt WebAppLaunchTemplate.LatestVersionNumber
+      MinSize: 1
+      MaxSize: 5
+      DesiredCapacity: 1
+      TargetGroupARNs:
+        - !Ref WebAppTargetGroup
+  WebAppLB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Subnets:
+        - Fn::ImportValue: !Sub "${ProjectName}-PUB1-SN"
+        - Fn::ImportValue: !Sub "${ProjectName}-PUB2-SN"
+      SecurityGroups:
+        - !Ref LBSecGroup
+  WebAppTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 8
+      HealthyThresholdCount: 2
+      Port: 80
+      Protocol: HTTP
+      VpcId:
+        Fn::ImportValue:
+          !Sub "${ProjectName}-VPCID"
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !GetAtt WebAppLB.LoadBalancerArn
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !GetAtt WebAppTargetGroup.TargetGroupArn
+  ALBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !GetAtt Listener.ListenerArn
+      Priority: 1
+      Actions:
+      - Type: forward
+        TargetGroupArn: !GetAtt WebAppTargetGroup.TargetGroupArn
+      Conditions:
+      - Field: path-pattern
+        Values: [/]
+
+  WebAppInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+      - !Ref WebAppRole
+  WebAppRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-WebAppRole"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ec2.amazonaws.com
+          Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+Outputs:
+  LoadBalancerURL:
+    Description: "The public URL of the Application (i.e. the LoadBalancer's DNS)"
+    Value: !Sub "http://${WebAppLB.DNSName}"
+    Export:
+      Name: !Sub "${ProjectName}-LoadBalancerURL"

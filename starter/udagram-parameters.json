@@ -1,6 +1,18 @@
 [
 	{
-		"ParameterKey": "Add you parameters here",
-		"ParameterValue": "Add you parameters here"
+        "ParameterKey": "ProjectName",
+        "ParameterValue": "Udagram"
+    },
+    {
+        "ParameterKey": "VolumeSize",
+        "ParameterValue": "10"
+    },
+    {
+		"ParameterKey": "ImageId",
+        "ParameterValue": "ami-0866a3c8686eaeeba"
+    },
+	{
+		"ParameterKey": "KeyPairName",
+		"ParameterValue": "udagram-keypair"
 	}
 ]
